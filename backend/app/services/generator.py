@@ -120,7 +120,7 @@ def smoke_path(trees):
     return next((path for path in ['/health', '/healthz', '/api/health', '/'] if path in paths), next(iter(paths)) if len(paths) == 1 else None)
 
 
-def workflow(path, application_root='.'):
+def workflow(path, application_root='.', existing_dockerfile=False):
     return '''name: Migration container smoke test
 on: [push, pull_request]
 permissions:
@@ -132,6 +132,10 @@ jobs:
     env:
       SMOKE_TEST_PATH: "''' + path + '''"
       APP_DIR: ''' + json.dumps(application_root) + '''
+      HOST_PORT: "10000"
+      CONTAINER_PORT: "10000"
+      # Existing images may ignore PORT. Confirm the actual listen port before enabling.
+      CONTAINER_PORT_REVIEWED: "''' + ('false' if existing_dockerfile else 'true') + '''"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -142,10 +146,14 @@ jobs:
         run: |
           set -euo pipefail
           trap 'docker logs ascend-smoke 2>/dev/null || true; docker rm -f ascend-smoke 2>/dev/null || true' EXIT
+          if [[ "$CONTAINER_PORT_REVIEWED" != "true" ]]; then
+            echo "::error::Review the existing Dockerfile's actual listen port, set CONTAINER_PORT, then set CONTAINER_PORT_REVIEWED=true. Existing images may ignore PORT."
+            exit 1
+          fi
           docker build -t ascend-smoke .
           # Add required application environment configuration before enabling this job.
-          docker run -d --name ascend-smoke -e PORT=10000 -p 127.0.0.1:10000:10000 ascend-smoke
-          curl --fail --retry 20 --retry-all-errors --retry-delay 3 --max-time 5 "http://127.0.0.1:10000${SMOKE_TEST_PATH}"
+          docker run -d --name ascend-smoke -e PORT="$CONTAINER_PORT" -p "127.0.0.1:${HOST_PORT}:${CONTAINER_PORT}" ascend-smoke
+          curl --fail --retry 20 --retry-all-errors --retry-delay 3 --max-time 5 "http://127.0.0.1:${HOST_PORT}${SMOKE_TEST_PATH}"
 '''
 
 
@@ -241,10 +249,11 @@ CMD {json.dumps(['sh', '-c', command])}
         else:
             add('Dockerfile', '')
             warnings.append("Existing Dockerfile reused without validation. Review its dependencies, PORT handling, non-root user, and specialized runtime packages; generated CI/Render files do not replace its startup command.")
+            warnings.append("Existing Dockerfile container port requires manual review: it may ignore PORT. Set the generated workflow's CONTAINER_PORT to the actual listen port, choose HOST_PORT separately, and set CONTAINER_PORT_REVIEWED=true only after review.")
         if any(name.startswith('.github/workflows/') for name in existing):
             result.skipped_files.append(SkippedFile(path='.github/workflows/ascend-migration.yml', reason='Existing CI workflows preserved; integrate container smoke testing manually.'))
         else:
-            add('.github/workflows/ascend-migration.yml', workflow(health, report.analysis_root))
+            add('.github/workflows/ascend-migration.yml', workflow(health, report.analysis_root, existing_dockerfile='Dockerfile' in existing))
         if any(name in existing for name in ['render.yaml', 'render.yml']):
             result.skipped_files.append(SkippedFile(path='render.yaml', reason='Existing Render configuration preserved; review and reuse it.'))
         else:
