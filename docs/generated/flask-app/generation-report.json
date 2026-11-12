@@ -1,0 +1,134 @@
+{
+  "eligible": true,
+  "status": "manual_review",
+  "analysis_root": ".",
+  "generated_files": [
+    {
+      "path": ".dockerignore",
+      "content": ".git\n.venv\nvenv\n**/__pycache__\n**/*.py[cod]\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.env\n.env.*\n**/.env\n**/.env.*\n!.env.example\n!**/.env.example\n# Add development/private database exclusions after checking required runtime assets:\n# **/*.db\n# **/*.sqlite\n# **/*.sqlite3\nnode_modules\n# Preserve application assets by default; review before excluding build directories:\n# dist\n# build\n.coverage\nhtmlcov\n",
+      "requires_manual_review": true
+    },
+    {
+      "path": "requirements.ascend.txt",
+      "content": "# Explicit production server. Review and pin a compatible version.\ngunicorn\n",
+      "requires_manual_review": true
+    },
+    {
+      "path": "Dockerfile",
+      "content": "FROM python:3.13-slim\nENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=10000\nRUN useradd --create-home --uid 10001 app && mkdir -p /app && chown app:app /app\nWORKDIR /app\nCOPY --chown=app:app . .\nRUN python -m pip install --no-cache-dir -r requirements.txt && python -m pip install --no-cache-dir -r requirements.ascend.txt\nUSER app\nEXPOSE 10000\nCMD [\"sh\", \"-c\", \"exec python -m gunicorn --bind \\\"0.0.0.0:${PORT:-10000}\\\" app:app\"]\n",
+      "requires_manual_review": true
+    },
+    {
+      "path": ".github/workflows/ascend-migration.yml",
+      "content": "name: Migration container smoke test\non: [push, pull_request]\npermissions:\n  contents: read\njobs:\n  smoke:\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    env:\n      SMOKE_TEST_PATH: \"/health\"\n      APP_DIR: \".\"\n      HOST_PORT: \"10000\"\n      CONTAINER_PORT: \"10000\"\n      # Existing images may ignore PORT. Confirm the actual listen port before enabling.\n      CONTAINER_PORT_REVIEWED: \"true\"\n    steps:\n      - uses: actions/checkout@v6\n        with:\n          persist-credentials: false\n      - name: Build and smoke test\n        working-directory: ${{ env.APP_DIR }}\n        shell: bash\n        run: |\n          set -euo pipefail\n          trap 'docker logs ascend-smoke 2>/dev/null || true; docker rm -f ascend-smoke 2>/dev/null || true' EXIT\n          if [[ \"$CONTAINER_PORT_REVIEWED\" != \"true\" ]]; then\n            echo \"::error::Review the existing Dockerfile's actual listen port, set CONTAINER_PORT, then set CONTAINER_PORT_REVIEWED=true. Existing images may ignore PORT.\"\n            exit 1\n          fi\n          docker build -t ascend-smoke .\n          # Add required application environment configuration before enabling this job.\n          docker run -d --name ascend-smoke -e PORT=\"$CONTAINER_PORT\" -p \"127.0.0.1:${HOST_PORT}:${CONTAINER_PORT}\" ascend-smoke\n          curl --fail --retry 20 --retry-all-errors --retry-delay 3 --max-time 5 \"http://127.0.0.1:${HOST_PORT}${SMOKE_TEST_PATH}\"\n",
+      "requires_manual_review": true
+    },
+    {
+      "path": "render.yaml",
+      "content": "# Review template; schema fields checked against https://render.com/docs/blueprint-spec\n# Nothing is provisioned by Ascend. Review free-tier limits before manual setup.\nservices:\n  - type: web\n    name: ascend-app\n    runtime: docker\n    plan: free\n    autoDeployTrigger: \"off\"\n    dockerfilePath: \"./Dockerfile\"\n    dockerContext: \".\"\n    healthCheckPath: \"/health\"\n    envVars:\n      - key: PORT\n        value: \"10000\"\n      - key: SECRET_KEY\n        sync: false\n",
+      "requires_manual_review": true
+    },
+    {
+      "path": "MIGRATION.md",
+      "content": "# Migration review guide\n\nFramework: Flask\nStartup target: `app:app` (application_object)\nSelected analysis root: \".\"\nPython image version: 3.13\nExecutable configuration available: True\n\n## Setup and validation\n1. Apply reviewed files to the selected application root (.); build context is that directory, not the complete repository.\n2. Exception: place .github/workflows/ascend-migration.yml and render.yaml at the repository root. Their paths refer to the selected application root; adjust them if extracting the application into a new standalone repository.\n3. Keep existing files unchanged and merge missing configuration manually. Read the generated migration guide before using any template.\n4. For generated Dockerfile: docker build -t ascend-app . ; run with docker run --rm -p 10000:10000 -e PORT=10000 ascend-app after adding required runtime environment configuration.\n5. Smoke-test http://localhost:10000/health; configure SMOKE_TEST_PATH and application environment in CI before relying on that workflow.\n6. Review render.yaml manually against Render's current official schema and free-plan limits. Set required variables in the dashboard; leave optional defaulted variables unset. No cloud resources have been created.\n\n## Warnings and manual review\n- Generated files require manual review. No build, startup, or cloud deployment has been validated.\n- Python version unknown: using configurable default 3.13; verify compatibility before building.\n- Review persistent/local storage and database files before building. Add explicit exclusions for development/private data; database and build-asset exclusions are commented suggestions so required runtime assets are preserved. Free Render instances do not provide persistent disks.\n- Review the HTTP smoke-test path and authentication/environment requirements; detected routes are not verified health checks.\n\n## Scanner limitations\n\n\n## Environment names (never values)\n- SECRET_KEY: no_default_detected\n\n## Existing files preserved\n- \".env.example\"\n\n## Unresolved readiness findings\n- NET001: Loopback-only server binding. Configure the production server to bind to 0.0.0.0 or the platform-required interface.\n- NET002: Hardcoded application port. Read the platform port from an environment variable, with an appropriate local default.\n- STO002: Potential local persistent storage. Review persistence needs; configure a durable volume or external storage and backups when necessary.\n- CTR001: No Dockerfile detected. For a container-based deployment, add and review a Dockerfile in a later configuration step.\n- CTR002: No .dockerignore detected. Add a .dockerignore before container builds to exclude environment files, caches, and development artifacts.\n- RUN002: Python runtime version is unknown. Declare a supported Python version in .python-version or pyproject.toml project.requires-python.\n\nNo generated files have been built or deployed by Ascend. A generic Python image cannot guarantee runtime compatibility. No databases, disks, credentials, or paid plans are provisioned. Review source before any build; pip/build systems may execute project build code during your manual build.\n",
+      "requires_manual_review": true
+    }
+  ],
+  "existing_files": [
+    ".env.example"
+  ],
+  "skipped_files": [
+    {
+      "path": ".env.example",
+      "reason": "Existing file preserved; review and reuse it. No replacement generated."
+    }
+  ],
+  "generation_warnings": [
+    "Generated files require manual review. No build, startup, or cloud deployment has been validated.",
+    "Python version unknown: using configurable default 3.13; verify compatibility before building.",
+    "Review persistent/local storage and database files before building. Add explicit exclusions for development/private data; database and build-asset exclusions are commented suggestions so required runtime assets are preserved. Free Render instances do not provide persistent disks.",
+    "Review the HTTP smoke-test path and authentication/environment requirements; detected routes are not verified health checks."
+  ],
+  "unresolved_findings": [
+    {
+      "rule_id": "NET001",
+      "title": "Loopback-only server binding",
+      "severity": "warning",
+      "confidence": "potential",
+      "category": "networking",
+      "file_path": "app.py",
+      "line_number": 21,
+      "explanation": "A Python startup call binds to loopback. A guarded development startup block may be overridden by production, but no clear resolving override was established for this call.",
+      "recommended_fix": "Configure the production server to bind to 0.0.0.0 or the platform-required interface.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "NET002",
+      "title": "Hardcoded application port",
+      "severity": "warning",
+      "confidence": "potential",
+      "category": "networking",
+      "file_path": "app.py",
+      "line_number": 21,
+      "explanation": "A Python startup call uses a literal port. This can be valid, but a PaaS may require an environment-supplied port.",
+      "recommended_fix": "Read the platform port from an environment variable, with an appropriate local default.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "STO002",
+      "title": "Potential local persistent storage",
+      "severity": "warning",
+      "confidence": "potential",
+      "category": "storage",
+      "file_path": "app.py",
+      "line_number": 9,
+      "explanation": "SQLite, file writes, or local storage configuration may require durable storage. SQLite is not inherently unsuitable; container filesystems may be ephemeral.",
+      "recommended_fix": "Review persistence needs; configure a durable volume or external storage and backups when necessary.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "CTR001",
+      "title": "No Dockerfile detected",
+      "severity": "informational",
+      "confidence": "confirmed",
+      "category": "containerization",
+      "file_path": null,
+      "line_number": null,
+      "explanation": "A Dockerfile was not detected. Many cloud platforms also support source builds, so this does not prevent cloud deployment.",
+      "recommended_fix": "For a container-based deployment, add and review a Dockerfile in a later configuration step.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "CTR002",
+      "title": "No .dockerignore detected",
+      "severity": "informational",
+      "confidence": "confirmed",
+      "category": "containerization",
+      "file_path": null,
+      "line_number": null,
+      "explanation": "A container build ignore file was not detected; future build contexts should exclude secrets, caches, and local dependencies.",
+      "recommended_fix": "Add a .dockerignore before container builds to exclude environment files, caches, and development artifacts.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "RUN002",
+      "title": "Python runtime version is unknown",
+      "severity": "informational",
+      "confidence": "potential",
+      "category": "runtime",
+      "file_path": null,
+      "line_number": null,
+      "explanation": "No single supported Python version declaration could be determined; the runtime may be declared elsewhere.",
+      "recommended_fix": "Declare a supported Python version in .python-version or pyproject.toml project.requires-python.",
+      "environment_variables": []
+    }
+  ],
+  "deployment_instructions": [
+    "Apply reviewed files to the selected application root (.); build context is that directory, not the complete repository.",
+    "Exception: place .github/workflows/ascend-migration.yml and render.yaml at the repository root. Their paths refer to the selected application root; adjust them if extracting the application into a new standalone repository.",
+    "Keep existing files unchanged and merge missing configuration manually. Read the generated migration guide before using any template.",
+    "For generated Dockerfile: docker build -t ascend-app . ; run with docker run --rm -p 10000:10000 -e PORT=10000 ascend-app after adding required runtime environment configuration.",
+    "Smoke-test http://localhost:10000/health; configure SMOKE_TEST_PATH and application environment in CI before relying on that workflow.",
+    "Review render.yaml manually against Render's current official schema and free-plan limits. Set required variables in the dashboard; leave optional defaulted variables unset. No cloud resources have been created."
+  ]
+}

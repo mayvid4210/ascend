@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { API_BASE_URL, MAX_UPLOAD_BYTES, isAnalysisReport, type AnalysisReport } from './analysis';
 import ReadinessResults from './ReadinessResults';
+import GenerationFiles from './GenerationFiles';
 
 const projectTypes = {
   web_application: 'Web application', python_library: 'Python library',
@@ -111,6 +112,7 @@ export default function UploadAnalysis() {
           <dt className="font-medium">Files scanned</dt><dd>{report.files_scanned}</dd>
         </dl>
         <ReadinessResults report={report} />
+        {file && <GenerationFiles report={report} file={file} />}
         {report.excluded_application_objects.length > 0 && <details className="mt-5 text-sm">
           <summary className="cursor-pointer font-medium">Excluded non-production application objects ({report.excluded_application_objects.length})</summary>
           <ul className="mt-2 list-inside list-disc">{report.excluded_application_objects.map((item) => <li key={`${item.path}:${item.object_name}`}>

@@ -2,6 +2,7 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localh
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export type EntryPointType = 'application_object' | 'application_factory';
 export interface Finding {
+  environment_variables?: { name: string; usage: 'required_access' | 'no_default_detected' | 'default_detected' }[];
   rule_id: string;
   title: string;
   severity: 'critical' | 'warning' | 'informational';

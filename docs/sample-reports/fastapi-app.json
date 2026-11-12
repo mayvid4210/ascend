@@ -1,0 +1,143 @@
+{
+  "readiness_score": 87,
+  "readiness_status": "ready_for_migration_review",
+  "assessment_provisional": true,
+  "findings": [
+    {
+      "rule_id": "NET001",
+      "title": "Loopback-only server binding",
+      "severity": "warning",
+      "confidence": "potential",
+      "category": "networking",
+      "file_path": "main.py",
+      "line_number": 18,
+      "explanation": "A Python startup call binds to loopback. A guarded development startup block may be overridden by production, but no clear resolving override was established for this call.",
+      "recommended_fix": "Configure the production server to bind to 0.0.0.0 or the platform-required interface.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "NET002",
+      "title": "Hardcoded application port",
+      "severity": "warning",
+      "confidence": "potential",
+      "category": "networking",
+      "file_path": "main.py",
+      "line_number": 18,
+      "explanation": "A Python startup call uses a literal port. This can be valid, but a PaaS may require an environment-supplied port.",
+      "recommended_fix": "Read the platform port from an environment variable, with an appropriate local default.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "STO002",
+      "title": "Potential local persistent storage",
+      "severity": "warning",
+      "confidence": "potential",
+      "category": "storage",
+      "file_path": "main.py",
+      "line_number": 9,
+      "explanation": "SQLite, file writes, or local storage configuration may require durable storage. SQLite is not inherently unsuitable; container filesystems may be ephemeral.",
+      "recommended_fix": "Review persistence needs; configure a durable volume or external storage and backups when necessary.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "CTR001",
+      "title": "No Dockerfile detected",
+      "severity": "informational",
+      "confidence": "confirmed",
+      "category": "containerization",
+      "file_path": null,
+      "line_number": null,
+      "explanation": "A Dockerfile was not detected. Many cloud platforms also support source builds, so this does not prevent cloud deployment.",
+      "recommended_fix": "For a container-based deployment, add and review a Dockerfile in a later configuration step.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "CTR002",
+      "title": "No .dockerignore detected",
+      "severity": "informational",
+      "confidence": "confirmed",
+      "category": "containerization",
+      "file_path": null,
+      "line_number": null,
+      "explanation": "A container build ignore file was not detected; future build contexts should exclude secrets, caches, and local dependencies.",
+      "recommended_fix": "Add a .dockerignore before container builds to exclude environment files, caches, and development artifacts.",
+      "environment_variables": []
+    },
+    {
+      "rule_id": "RUN002",
+      "title": "Python runtime version is unknown",
+      "severity": "informational",
+      "confidence": "potential",
+      "category": "runtime",
+      "file_path": null,
+      "line_number": null,
+      "explanation": "No single supported Python version declaration could be determined; the runtime may be declared elsewhere.",
+      "recommended_fix": "Declare a supported Python version in .python-version or pyproject.toml project.requires-python.",
+      "environment_variables": []
+    }
+  ],
+  "severity_summary": {
+    "critical": 0,
+    "warning": 3,
+    "informational": 3
+  },
+  "migration_recommendations": [
+    "Configure the production server to bind to 0.0.0.0 or the platform-required interface.",
+    "Read the platform port from an environment variable, with an appropriate local default.",
+    "Review persistence needs; configure a durable volume or external storage and backups when necessary.",
+    "For a container-based deployment, add and review a Dockerfile in a later configuration step.",
+    "Add a .dockerignore before container builds to exclude environment files, caches, and development artifacts.",
+    "Declare a supported Python version in .python-version or pyproject.toml project.requires-python.",
+    "After reviewing these findings, consider a container-based PaaS with a managed HTTP service, environment-injected configuration, health checks, and durable storage when needed. No provider is provisioned or deployed by Ascend."
+  ],
+  "assessment_limitations": [
+    "Static analysis does not guarantee successful deployment; review and test the production configuration.",
+    "Only static Python source and supported metadata in the selected scope are inspected; production commands, external services, and deployment behavior are not verified."
+  ],
+  "project_name": "fastapi-app",
+  "project_type": "web_application",
+  "analysis_root": ".",
+  "project_root_candidates": [
+    "."
+  ],
+  "dependency_files": [
+    "requirements.txt"
+  ],
+  "excluded_application_objects": [],
+  "framework": "FastAPI",
+  "python_version": null,
+  "dependencies": [
+    {
+      "name": "fastapi",
+      "version": "<1,>=0.162"
+    },
+    {
+      "name": "uvicorn",
+      "version": "<1,>=0.54"
+    }
+  ],
+  "dependency_file_present": true,
+  "entry_point": "main:app",
+  "entry_point_type": "application_object",
+  "entry_point_candidate_types": {
+    "main:app": "application_object"
+  },
+  "entry_point_candidates": [
+    "main:app"
+  ],
+  "environment_variables": [
+    "STORAGE_PATH"
+  ],
+  "detected_ports": [
+    8001
+  ],
+  "detected_hosts": [
+    "localhost"
+  ],
+  "dockerfile_present": false,
+  "dockerignore_present": false,
+  "env_example_present": true,
+  "deployment_files": [],
+  "files_scanned": 3,
+  "analysis_warnings": []
+}

@@ -251,6 +251,24 @@ describe('project ZIP analysis', () => {
     expect(results).toHaveTextContent('Upload one supported web application directory.');
   });
 
+  it('shows exact undocumented names and optional-default wording from ENV001', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+      ...report, findings: [{ rule_id: 'ENV001', title: 'Undocumented environment requirements',
+        severity: 'warning', confidence: 'confirmed', category: 'runtime', file_path: 'main.py', line_number: 3,
+        explanation: 'TOKEN (no default detected; potentially required); DEBUG (default detected; may be optional).',
+        recommended_fix: 'Document the variable names using safe placeholders only.',
+        environment_variables: [{ name: 'TOKEN', usage: 'no_default_detected' }, { name: 'DEBUG', usage: 'default_detected' }],
+      }],
+    }) }));
+    render(<UploadAnalysis />);
+    select();
+    submit();
+    const results = await screen.findByRole('region', { name: 'Cloud readiness' });
+    expect(results).toHaveTextContent('TOKEN (no default detected; potentially required)');
+    expect(results).toHaveTextContent('DEBUG (default detected; may be optional)');
+    expect(results).toHaveTextContent('safe placeholders only');
+  });
+
   it('does not mark a nonprovisional report as provisional', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => report }));
     render(<UploadAnalysis />);

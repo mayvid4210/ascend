@@ -1,0 +1,118 @@
+name: Validate generated migration containers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'examples/flask-app/**'
+      - 'examples/fastapi-app/**'
+      - 'scripts/prepare_validation.py'
+      - '.github/workflows/validate-migration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate ${{ matrix.sample }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [flask-app, fastapi-app]
+    env:
+      CONTAINER_NAME: ascend-validation-${{ matrix.sample }}
+      IMAGE_NAME: ascend-validation-${{ matrix.sample }}
+      HOST_PORT: '18080'
+      # Deliberately override the generated default (10000) to verify PORT support.
+      CONTAINER_PORT: '18081'
+      ASCEND_DEFAULT_PYTHON_VERSION: '3.13'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install Ascend backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Generate fresh trusted sample context
+        shell: bash
+        run: |
+          set -euo pipefail
+          context="$RUNNER_TEMP/ascend-validation-${{ matrix.sample }}"
+          echo "CONTEXT_DIR=$context" >> "$GITHUB_ENV"
+          python scripts/prepare_validation.py --sample '${{ matrix.sample }}' --output "$context"
+      - name: Build generated image
+        run: docker build --progress=plain -t "$IMAGE_NAME" "$CONTEXT_DIR"
+      - name: Start generated container
+        shell: bash
+        run: |
+          set -euo pipefail
+          # These are non-secret CI-only sample settings, never deployment credentials.
+          docker run -d --name "$CONTAINER_NAME" \
+            -e PORT="$CONTAINER_PORT" \
+            -e SECRET_KEY=ascend-ci-placeholder-not-a-secret \
+            -e STORAGE_PATH=/app/data \
+            -p "127.0.0.1:${HOST_PORT}:${CONTAINER_PORT}" "$IMAGE_NAME"
+      - name: Verify real health HTTP response
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import HTTPRedirectHandler, build_opener
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          url = f"http://127.0.0.1:{os.environ['HOST_PORT']}/health"
+          opener = build_opener(NoRedirect())
+          for attempt in range(30):
+              try:
+                  with opener.open(url, timeout=5) as response:
+                      status = response.status
+                      payload = json.load(response)
+                  if status != 200 or payload != {"status": "ok"}:
+                      raise RuntimeError("Unexpected health status or JSON body")
+                  print(f"PASS: {url} returned HTTP 200 and the expected status body")
+                  break
+              except (HTTPError, URLError, TimeoutError, ValueError, RuntimeError, OSError) as exc:
+                  print(f"Health attempt {attempt + 1}/30: {type(exc).__name__}: {exc}")
+                  if attempt == 29:
+                      raise SystemExit("FAIL: container health endpoint did not return HTTP 200 and {status: ok}")
+                  time.sleep(2)
+          PY
+      - name: Container diagnostics
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          docker ps -a --filter "name=$CONTAINER_NAME"
+          docker inspect "$CONTAINER_NAME" || true
+          docker logs "$CONTAINER_NAME" || true
+      - name: Clean up container, image, and context
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          docker rm -f "$CONTAINER_NAME" || true
+          docker image rm -f "$IMAGE_NAME" || true
+          python - <<'PY'
+          import os
+          import shutil
+          import sys
+          from pathlib import Path
+          if not os.environ.get('CONTEXT_DIR'):
+              print('No context was prepared; nothing to remove.')
+              sys.exit(0)
+          root = Path(os.environ['RUNNER_TEMP']).resolve()
+          context = Path(os.environ['CONTEXT_DIR']).resolve()
+          if context.parent != root or not context.name.startswith('ascend-validation-'):
+              raise SystemExit('Refusing unsafe context cleanup')
+          shutil.rmtree(context, ignore_errors=True)
+          PY
