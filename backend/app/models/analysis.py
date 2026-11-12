@@ -3,6 +3,9 @@
 from typing import Literal
 
 from pydantic import BaseModel
+from app.models.readiness import ReadinessAssessment
+
+EntryPointType = Literal["application_object", "application_factory"]
 
 
 class Dependency(BaseModel):
@@ -16,7 +19,7 @@ class ExcludedApplication(BaseModel):
     scope: Literal["test", "example", "documentation", "benchmark", "tooling"]
 
 
-class AnalysisReport(BaseModel):
+class AnalysisReport(ReadinessAssessment):
     project_name: str
     project_type: Literal["web_application", "python_library", "framework_repository", "ambiguous", "unsupported"]
     analysis_root: str | None
@@ -28,6 +31,8 @@ class AnalysisReport(BaseModel):
     dependencies: list[Dependency]
     dependency_file_present: bool
     entry_point: str | None = None
+    entry_point_type: EntryPointType | None = None
+    entry_point_candidate_types: dict[str, EntryPointType]
     entry_point_candidates: list[str]
     environment_variables: list[str]
     detected_ports: list[int]

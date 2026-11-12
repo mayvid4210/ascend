@@ -7,10 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from app.api.analyze import router
+from app.api.generate import router as generation_router
 from app.services.archive import MAX_UPLOAD_BYTES
 
 app = FastAPI(title="Ascend")
 app.include_router(router)
+app.include_router(generation_router)
 # Bound multipart overhead as well as files, including chunked requests.
 app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_UPLOAD_BYTES + 64 * 1024)
 origins = os.getenv(

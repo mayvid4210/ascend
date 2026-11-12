@@ -30,6 +30,11 @@ def analyze_archive(source, project_name: str) -> AnalysisReport:
     }}}},
 })
 async def analyze(request: Request) -> AnalysisReport:
+    return await process_upload(request, analyze_archive)
+
+
+async def process_upload(request: Request, processor):
+    """Shared, bounded multipart transport. Processor completes before upload cleanup."""
     if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "multipart/form-data":
         raise HTTPException(415, "Send one ZIP archive as multipart/form-data in the 'file' field.")
     async with request.form(max_files=1, max_fields=0) as form:
@@ -42,4 +47,4 @@ async def analyze(request: Request) -> AnalysisReport:
             raise HTTPException(413, "ZIP upload exceeds the 10 MB limit.")
         filename = upload.filename.replace("\\", "/").rsplit("/", 1)[-1]
         name = re.sub(r"[^A-Za-z0-9_.-]", "_", filename[:-4])[:100] or "uploaded-project"
-        return await run_in_threadpool(analyze_archive, upload.file, name)
+        return await run_in_threadpool(processor, upload.file, name)

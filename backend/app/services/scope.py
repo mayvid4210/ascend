@@ -32,6 +32,8 @@ def unwrap_root(root: Path, files: list[Path]) -> Path:
         first = relative[0].parts[0]
         if any(len(path.parts) < 2 or path.parts[0] != first for path in relative):
             break
+        if root / first / "__init__.py" in files:
+            break  # Preserve importable package names such as flaskr.
         if first.lower() in {*DIRECTORY_SCOPES, "src", "apps", "packages"}:
             # An explicitly uploaded example root with its own declaration is valid.
             child = root / first

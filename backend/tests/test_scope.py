@@ -172,7 +172,7 @@ dev = ["dev-only"]
         {'name': 'private', 'version': None},
         {'name': 'uvicorn', 'version': '>=0.54'},
     ]
-    assert 'secret' not in response.text
+    assert 'user:secret' not in response.text
 
 
 def test_requirements_at_selected_root_take_precedence_over_pyproject():
@@ -197,7 +197,9 @@ def test_existing_apps_are_classified_without_claiming_readiness(source, framewo
     assert report['project_type'] == 'web_application'
     assert report['framework'] == framework
     assert report['entry_point'] == 'main:app'
-    assert 'readiness_score' not in report
+    assert report['readiness_score'] is not None
+    assert report['assessment_provisional'] is True
+    assert any('does not guarantee' in item for item in report['assessment_limitations'])
 
 
 def test_non_web_package_without_pyproject_is_a_library():

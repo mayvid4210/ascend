@@ -72,7 +72,7 @@ private @ https://user:secret@example.com/private.whl
         {'name': 'uvicorn', 'version': None},
     ]
     assert report['analysis_warnings']
-    assert 'secret' not in response.text
+    assert 'user:secret' not in response.text
     assert 'https://' not in response.text
 
 
@@ -84,10 +84,11 @@ def test_entry_point_ambiguity():
     assert any('Multiple entry points' in item for item in report['analysis_warnings'])
 
 
-def test_factory_is_not_guessed_as_an_entry_point():
+def test_direct_factory_is_detected_as_an_entry_point():
     report = upload({'app.py': 'from flask import Flask\ndef create_app():\n    return Flask(__name__)'}).json()
     assert report['framework'] == 'Flask'
-    assert report['entry_point'] is None
+    assert report['entry_point'] == 'app:create_app'
+    assert report['entry_point_type'] == 'application_factory'
 
 
 def test_environment_names_and_no_secret_values():

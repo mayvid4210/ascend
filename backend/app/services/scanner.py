@@ -44,7 +44,7 @@ def read_text(path: Path, warnings: set[str]) -> str:
         return ""
 
 
-def source_aliases(tree: ast.Module, *, module_only: bool = True) -> dict[str, str]:
+def source_aliases(tree: ast.Module | ast.FunctionDef, *, module_only: bool = True) -> dict[str, str]:
     aliases = {}
     for node in tree.body if module_only else ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -73,6 +73,72 @@ def application_names(tree: ast.Module, aliases: dict[str, str]) -> list[str]:
     return sorted(set(names))
 
 
+def application_factories(tree: ast.Module, aliases: dict[str, str]) -> list[str]:
+    """Recognize simple, synchronous, zero-required-argument factory functions.
+
+    Require an explicit final return and don't infer values through control flow.
+    Configuration branches are fine when they don't rebind the returned app.
+    """
+    names = []
+    constructors = {"flask.Flask", "fastapi.FastAPI"}
+    for function in tree.body:
+        if not isinstance(function, ast.FunctionDef) or function.decorator_list:
+            continue
+        args = function.args
+        if (len(args.posonlyargs) + len(args.args) > len(args.defaults)
+                or any(default is None for default in args.kw_defaults)):
+            continue
+        if not function.body or not isinstance(function.body[-1], ast.Return):
+            continue
+        if any(isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(function)):
+            continue
+        local_aliases = {**aliases, **source_aliases(function)}
+        for argument in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+            if argument:
+                local_aliases.pop(argument.arg, None)
+        applications: set[str] = set()
+
+        def constructs_app(value):
+            return isinstance(value, ast.Call) and resolve_name(value.func, local_aliases) in constructors
+
+        for statement in function.body[:-1]:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                applications.discard(statement.name)
+                local_aliases.pop(statement.name, None)
+                continue
+            if isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                for target in targets:
+                    # Complex destructuring and indirect aliases are intentionally unsupported.
+                    for node in ast.walk(target):
+                        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                            applications.discard(node.id)
+                            local_aliases.pop(node.id, None)
+                    if isinstance(target, ast.Name) and constructs_app(statement.value):
+                        applications.add(target.id)
+            else:
+                nodes = list(ast.walk(statement))
+                if isinstance(statement, ast.Raise) or any(isinstance(node, (ast.Return, ast.Yield, ast.YieldFrom)) for node in nodes):
+                    applications.clear()
+                    break
+                for node in nodes:
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                        applications.discard(node.id)
+                        local_aliases.pop(node.id, None)
+        else:
+            returned = function.body[-1].value
+            if constructs_app(returned) or isinstance(returned, ast.Name) and returned.id in applications:
+                names.append(function.name)
+    return sorted(set(names))
+
+
+def module_name(path: Path, root: Path) -> str | None:
+    parts = path.relative_to(root).with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts) if parts and all(part.isidentifier() for part in parts) else None
+
+
 def project_metadata(path: Path, warnings: set[str]) -> dict:
     try:
         config = tomllib.loads(read_text(path, warnings))
@@ -96,11 +162,13 @@ def scan_project(root: Path, files: list[Path], fallback_name: str) -> AnalysisR
 
     trees = {}
     objects = {}
+    factories = {}
     for path in py_files:
         try:
             tree = ast.parse(read_text(path, warnings))
             trees[path] = tree
             objects[path] = application_names(tree, source_aliases(tree))
+            factories[path] = application_factories(tree, source_aliases(tree))
         except (SyntaxError, ValueError, RecursionError):
             warnings.add("Some Python files could not be parsed; analysis may be incomplete.")
     selected, root_candidates, scoped_files = select_scope(root, files)
@@ -155,15 +223,20 @@ def scan_project(root: Path, files: list[Path], fallback_name: str) -> AnalysisR
 
     frameworks: set[str] = set()
     candidates: set[str] = set()
+    candidate_types = {}
     env: set[str] = set()
     ports: set[int] = set()
     hosts: set[str] = set()
     # With ambiguous roots retain primary candidate locations, but not combined runtime metadata.
     if selected is None:
-        for path, names in objects.items():
+        for path in trees:
             if source_scope(path, repository_root) == "primary":
-                module = path.relative_to(repository_root).with_suffix("").as_posix().replace("/", ".")
-                candidates.update(f"{module}:{name}" for name in names)
+                module = module_name(path, repository_root) or path.relative_to(repository_root).as_posix()
+                for names, kind in [(objects[path], "application_object"), (factories[path], "application_factory")]:
+                    for name in names:
+                        target = f"{module}:{name}"
+                        candidates.add(target)
+                        candidate_types[target] = kind
     for path in py_files:
         if path not in trees:
             continue
@@ -178,14 +251,14 @@ def scan_project(root: Path, files: list[Path], fallback_name: str) -> AnalysisR
                 frameworks.add("Flask" if value.split(".")[0] == "flask" else "FastAPI")
 
         app_names: set[str] = set()
-        # Only module-level app assignments are importable startup candidates.
-        for name in objects[path]:
-            module = path.relative_to(root).with_suffix("").parts
-            if module[-1] == "__init__":
-                module = module[:-1]
-            if module and all(part.isidentifier() for part in module):
-                candidates.add(f"{'.'.join(module)}:{name}")
-                app_names.add(name)
+        module = module_name(path, root)
+        if module:
+            for names, kind in [(objects[path], "application_object"), (factories[path], "application_factory")]:
+                for name in names:
+                    target = f"{module}:{name}"
+                    candidates.add(target)
+                    candidate_types[target] = kind
+            app_names.update(objects[path])
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -246,7 +319,7 @@ def scan_project(root: Path, files: list[Path], fallback_name: str) -> AnalysisR
         } for path in py_files)
     if framework_source:
         frameworks.add("Flask" if str(project_name).lower() == "flask" else "FastAPI")
-    primary_objects = any(objects.get(path) for path in py_files)
+    primary_objects = any(objects.get(path) or factories.get(path) for path in py_files)
     if selected is None or len(candidates) > 1:
         project_type = "ambiguous"
     elif primary_objects:
@@ -267,7 +340,7 @@ def scan_project(root: Path, files: list[Path], fallback_name: str) -> AnalysisR
     if len(candidates) > 1:
         warnings.add("Multiple entry points found; select a startup target manually.")
     elif not candidates:
-        warnings.add("No unambiguous module-level Flask or FastAPI application object found.")
+        warnings.add("No unambiguous Flask or FastAPI application object or supported factory found.")
     if not frameworks:
         warnings.add("Unsupported or unknown Python application; only Flask and FastAPI are recognized.")
     names = {path.name for path in files}
@@ -277,7 +350,8 @@ def scan_project(root: Path, files: list[Path], fallback_name: str) -> AnalysisR
         or (any(part in {"k8s", "kubernetes"} for part in path.relative_to(root).parts)
             and path.suffix in {".yml", ".yaml"})
     ))
-    return AnalysisReport(
+    entry_point = next(iter(candidates)) if len(candidates) == 1 and selected else None
+    report = AnalysisReport(
         project_name=root.name if root.name != "project" else fallback_name,
         project_type=project_type,
         analysis_root=selected.relative_to(repository_root).as_posix() if selected else None,
@@ -287,10 +361,16 @@ def scan_project(root: Path, files: list[Path], fallback_name: str) -> AnalysisR
         python_version=next(iter(versions)) if len(versions) == 1 else None,
         dependencies=[Dependency(name=name, version=version) for name, version in sorted(dependencies, key=lambda item: (item[0].lower(), item[0], item[1] or ""))],
         dependency_file_present=bool(dependency_files),
-        entry_point=next(iter(candidates)) if len(candidates) == 1 and selected else None,
+        entry_point=entry_point,
+        entry_point_type=candidate_types.get(entry_point),
+        entry_point_candidate_types=dict(sorted(candidate_types.items())),
         entry_point_candidates=sorted(candidates), environment_variables=sorted(env),
         detected_ports=sorted(ports), detected_hosts=sorted(hosts),
         dockerfile_present=any(name == "Dockerfile" or name.startswith("Dockerfile.") for name in names),
         dockerignore_present=".dockerignore" in names, env_example_present=".env.example" in names,
         deployment_files=deployment, files_scanned=len(files), analysis_warnings=sorted(warnings),
     )
+    # Assess while the scoped temporary files and parsed trees are still available.
+    from app.services.readiness import assess
+    assessment = assess(report, root, files, trees)
+    return report.model_copy(update={name: getattr(assessment, name) for name in type(assessment).model_fields})
